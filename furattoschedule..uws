@@ -1,0 +1,169 @@
+CONST PATTERN_LIST_TIME = "[0-9０-９]{1,2}:[0-9０-９]{2}\s*(～|集合)"
+CONST PATTERN_TIMETEXT = "[0-9０-９]{1,2}時(半|[0-9０-９]{1,2}分)?～[0-9０-９]{1,2}時(半|[0-9０-９]{1,2}分)?"
+CONST PATTERN_PLACE_TIME = "集合[ 　]*[:：]([0-9０-９]{1,2}時(半|[0-9０-９]{1,2}分)?)?[ 　]*([^ 　\r\n]+)"
+CONST PATTERN_TIME = "(\d{1,2}):?(半|\d{1,2}分?)?"
+CONST PATTERN_MAILADDR = "[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*"
+CONST PATTERN_TELEPHONE = "[0-9０-９]{2,4}-[0-9０-９]{2,4}-[0-9０-９]{4}"
+CONST PLACE_DEFAULT = "ふらっとステーション・とつか"
+CONST LOG_SEPARATOR = "----------------------------------"
+PUBLIC reg = CREATEOLEOBJ("VBScript.RegExp")
+PUBLIC fso = CREATEOLEOBJ("Scripting.FileSystemObject")
+PUBLIC m = NULL
+
+COM_ERR_IGN
+DIM word = GETACTIVEOLEOBJ( "Word.Application")
+DIM files[0]
+DIM doc_count = GETOLEITEM( word.documents )
+COM_ERR_RET
+IFB doc_count <= 0 OR COM_ERR_FLG THEN
+  MSGBOX("ふらっとステーション・とつか わくわくだより ファイルを開いてください")
+  EXIT
+ENDIF
+GETTIME()
+RESIZE(files, doc_count)
+FOR i = 0 TO doc_count - 1
+  files[i] = ALL_OLE_ITEM[i].name
+NEXT
+// ドキュメントファイルを選択
+DIM file = SLCTBOX(SLCT_CMB + SLCT_STR, 0, "ファイルを選択", files)
+
+IF file = "-1" THEN EXITEXIT
+
+// ドキュメントファイルを開く
+DIM doc = word.documents(file)
+
+DIM fid = FOPEN(fso.buildPath(GET_CUR_DIR, "import.csv"), F_WRITE1)
+DIM row = 1
+FPUT(fid, "Start Date", row, 1)
+FPUT(fid, "Start Time", row, 2)
+FPUT(fid, "End Date", row, 3)
+FPUT(fid, "End Time", row, 4)
+FPUT(fid, "Subject", row, 5)
+FPUT(fid, "Location", row, 6)
+FPUT(fid, "Description", row, 7)
+// テーブル走査
+FOR i = 1 TO doc.tables.count
+  DIM table = doc.tables[i]
+  FOR l = 1 TO table.range.cells.count
+    DIM date
+    DIM text
+    DIM time
+    DIM r = table.range
+    DIM t = TRIM(r.cells[l].range.text)
+  	SELECT r.cells[l].columnIndex
+  	CASE 1
+  	  date = STRCONV(t, SC_HALFWIDTH)
+  	CASE 3
+      text = t
+    CASE 4
+      time = SPLIT(t, "～")
+    SELEND
+    IF r.cells[l].columnIndex <> 4 THEN CONTINUE
+    // データ化
+    IF text = "" THEN CONTINUE
+    IF text = "定休日" THEN CONTINUE
+    m = regexecute("^([^□]*)(.*)", text)
+    event = m.item[0].subMatches[0]
+    text = m.item[0].subMatches[1]
+    PRINT event
+    PRINT LOG_SEPARATOR
+    DIM info = text
+    DIM sttime = ""
+    DIM edtime = ""
+    DIM detail = ""
+    DIM place = ""
+    sttime = normalizetime(time[0])
+    edtime = normalizetime(time[1])
+    IFB info = "" THEN
+      PRINT "詳細文が見つかりません"
+      detail = ""
+      place = PLACE_DEFAULT
+    ELSE
+      PRINT "詳細文が見つかりました"
+      detail = info
+      DIM pm = regexecute(PATTERN_PLACE_TIME, detail)
+      IFB pm.count > 0 THEN
+        place = TRIM(pm.item[0].subMatches[2])
+        IF STRCONV(place, SC_HALFWIDTH) = "ふらっとST" THEN place = PLACE_DEFAULT
+      ELSE
+        place = PLACE_DEFAULT
+      ENDIF
+    ENDIF
+    // 電話番号・メールアドレス削除
+    detail = regreplace(regreplace(detail, "", PATTERN_MAILADDR), "", PATTERN_TELEPHONE)
+    
+    PRINT sttime + "～" + edtime
+    PRINT detail
+    PRINT place
+    PRINT ""
+    
+    // 出力
+    DIM d = G_TIME_YY4 + "/" + (G_TIME_MM + 1) + "/" + date
+    row = row + 1
+    FPUT(fid, d, row, 1)
+    FPUT(fid, sttime, row, 2)
+    FPUT(fid, d, row, 3)
+    FPUT(fid, edtime, row, 4)
+    FPUT(fid, "<#DBL>" + event + "<#DBL>", row, 5)
+    FPUT(fid, "<#DBL>" + place + "<#DBL>", row, 6)
+    FPUT(fid, "<#DBL>" + detail + "<#DBL>", row, 7)
+  NEXT
+NEXT
+
+FCLOSE(fid)
+MSGBOX("インポート用CSVファイルがスクリプトファイルのあるフォルダに作成されました。<#CR>Googleカレンダーのインポート機能よりインポートしてください")
+
+///
+/// スペース類文字を削除する
+///
+FUNCTION removespaces(text)
+  RESULT = regreplace(text, "", "[ 　\r\n]")
+FEND
+
+///
+/// 文字列形式の時刻表記をGoogleカレンダーの時刻表記に変換
+///
+FUNCTION normalizetime(time)
+  DIM s = STRCONV(time, SC_HALFWIDTH)
+  DIM m = regexecute(PATTERN_TIME, s)
+  IFB m.count > 0 THEN
+    DIM h = m.item[0].subMatches[0]
+    DIM n = m.item[0].subMatches[1]
+    IF n = "半" THEN n = "30"
+    IF n = "" THEN n = "00"
+    PRINT h + ":" + n
+    RESULT = h + ":" + n
+  ELSE
+    RESULT = ""
+  ENDIF
+FEND
+
+///
+/// 正規表現検索を実行する
+///
+FUNCTION regexecute(pattern, str, ignoreCase=true,global=true)
+  reg.IgnoreCase = ignoreCase
+  reg.Global = global
+  reg.Pattern = pattern
+  RESULT = reg.execute(str)
+FEND
+
+FUNCTION regtok(pattern, var str, ignoreCase=true,global=true)
+  DIM m = regexecute(pattern, str, ignoreCase, global)
+  IFB m.count > 1 THEN
+    DIM mm = m.item[0]
+    DIM f = mm.firstindex + mm.length
+    RESULT = COPY(str, 1, f)
+    str = COPY(str,  f + 1)
+  ELSE
+    RESULT = str
+    str = ""
+  ENDIF
+FEND
+
+FUNCTION regreplace(str, replacement, pattern, ignoreCase=true,global=true)
+   reg.IgnoreCase = ignoreCase
+   reg.Global = global
+   reg.Pattern = pattern
+   RESULT = reg.replace(str, replacement)
+FEND

@@ -1,0 +1,224 @@
+CONST _WAKUWAKU_FN_PICKER = "(第([0-9]+)号([0-9]+)月号わくわくだより)(?:1-4.pdf)?"
+CONST _WAKUWAKU_BASENAME = "第n号m月号わくわくだより"
+CONST _WAKUWAKU_BASEFILENAME = "news-letterym"
+CONST _WORKDIR_NAME = "wakuwaku_work"
+CONST _INIFILE = "data.ini"
+CONST _FB_UPLOAD_URL = "https://www.facebook.com/furatto.totsuka/"
+SELECT SLCTBOX(SLCT_BTN, 0, "処理を選択してください", "PDF分割処理(最初に実行してください)", "Facebookアップロード", "WordPressアップロード", "出力フォルダを開く", "キャンセル")
+CASE SLCT_1
+  SplitPDFFile()
+CASE SLCT_2
+  FBUpload()
+CASE SLCT_3
+  WPUpload()
+CASE SLCT_4
+  OpenDir()
+SELEND
+
+PROCEDURE SplitPDFFile()
+  // ファイルのコピー
+  DIM workdir = GetWorkDir(TRUE)
+  DIM fso = CREATEOLEOBJ("Scripting.FileSystemObject")
+  PRINT ">> ファイルをコピーしています"
+  DIM fnroot = GetWakuwakuFile()
+  DIM fnbase = fso.buildPath(GET_CUR_DIR, fnroot)
+  fso.copyFile(fnbase + "1-4.pdf", w("14.pdf"))
+  fso.copyFile(fnbase + "2-3.pdf", w("23.pdf"))
+  PRINT ">> PDF分割処理を開始します"
+  ExecuteCommand("convert -density 150 " + w("14.pdf") + " ( +clone -alpha opaque -fill White -colorize 100% ) +swap -geometry +0+0 -compose Over -composite " + w("14.jpg"))
+  ExecuteCommand("convert -density 150 " + w("23.pdf") + " ( +clone -alpha opaque -fill White -colorize 100% ) +swap -geometry +0+0 -compose Over -composite " + w("23.jpg"))
+  ExecuteCommand("convert -crop 50%x100% " + w("14.jpg") + " " + w("14.out.jpg"))
+  ExecuteCommand("convert -crop 50%x100% " + w("23.jpg") + " " + w("23.out.jpg"))
+  fso.moveFile(w("14.out-1.jpg"), w("out.1.jpg"))
+  fso.moveFile(w("23.out-0.jpg"), w("out.2.jpg"))
+  fso.moveFile(w("23.out-1.jpg"), w("out.3.jpg"))
+  fso.moveFile(w("14.out-0.jpg"), w("out.4.jpg"))
+  ExecuteCommand("convert -density 150 -geometry 1240x1754 " + w("out.*.jpg") + " " + w("out.pdf"))
+  WRITEINI("general", "do", "TRUE", w(_INIFILE))
+  DIM n = VAL(RegGetstr(_WAKUWAKU_FN_PICKER, fnroot, 1))
+  DIM m = VAL(RegGetstr(_WAKUWAKU_FN_PICKER, fnroot, 2))
+  DIM y = INT(2014 + (n / 12) + 0.2)
+  DIM wfile = GetWakuwakuFileName(y, m, n)
+  fso.copyFile(w("out.pdf"), w(wfile + ".pdf"))  
+  fso.copyFile(w("out.pdf"), fnbase + ".pdf")
+  WRITEINI("general", "number", n, w(_INIFILE))
+  WRITEINI("general", "month", m, w(_INIFILE))
+  WRITEINI("general", "year", y, w(_INIFILE))
+  PRINT ">> PDF分割処理が完了しました"
+FEND
+
+PROCEDURE FBUpload()
+TEXTBLOCK UPLOADTEXT
+ふらっとステーション・とつか わくわくだより%mm%月号が完成しました。気になるイベントがありましたら是非どうぞお越しください。
+なお、イベントカレンダーのほうも、更新済みです。どうぞご覧ください。
+http://bit.ly/furatto_calendar
+ENDTEXTBLOCK
+  IFB READINI("general", "do", w(_INIFILE)) <> "TRUE" THEN
+    MSGBOX("まずはPDF分割処理を実施してください")
+    EXIT
+  ENDIF
+  PRINT ">> Facebookアップロード処理を開始します"
+
+  DIM IE = CREATEOLEOBJ("InternetExplorer.Application")
+  IE.Visible = TRUE
+  IE.Navigate(_FB_UPLOAD_URL)
+  IE_BusyWait(IE)
+  PRINT "写真セット"
+  IE.document.querySelector("#PHOTO_VIDEO").click()
+  SLEEP(2)
+  IE.document.querySelector("table.uiGrid a:first-child > div > input").focus();
+  SLEEP(1)
+  KBD(VK_SPACE)
+  PRINT "ファイルをアップロードします"
+  DIM id = GETID("アップロードするファイルの選択", "#32770", -1)
+  PRINT "ダイアログ発見"
+  SLEEP(5)
+  SENDSTR(id, GetWorkDir(FALSE), 2)
+  CLKITEM(id, "開く")
+  SLEEP(2)
+  SENDSTR(id, "<#DBL>out.1.jpg<#DBL> <#DBL>out.2.jpg<#DBL> <#DBL>out.3.jpg<#DBL> <#DBL>out.4.jpg<#DBL> " , 2)
+  CLKITEM(id, "開く")
+  SLEEP(5)
+  SENDSTR(0, REPLACE(UPLOADTEXT, "%mm%", READINI("general", "month", w(_INIFILE))))
+  MSGBOX("投稿文をクリップボードにコピーしました。貼り付け後OKを押してください")
+  IE.document.querySelector("#pagelet_timeline_main_column [data-testid=react-composer-post-button]").click()
+  SLEEP(3)
+  IE_BusyWait(IE)
+  IE.Quit()
+
+  PRINT ">> Facebookアップロード処理が完了しました"
+FEND
+
+PROCEDURE WPUpload()
+  IFB READINI("general", "do", w(_INIFILE)) <> "TRUE" THEN
+    MSGBOX("まずはPDF分割処理を実施してください")
+    EXIT
+  ENDIF
+  PRINT ">> Wordpressアップロード処理"
+  DIM IE = CREATEOLEOBJ("InternetExplorer.Application")
+  IE.Visible = TRUE
+  IE.Navigate("http://furatto-totsuka.com/wp/wp-admin/post-new.php?post_type=wpdmpro")
+  IE_BusyWait(IE)
+  PRINT "投稿セット"
+  DIM m = READINI("general", "month", w(_INIFILE))
+  DIM y = READINI("general", "year", w(_INIFILE))
+  DIM n = READINI("general", "number", w(_INIFILE))
+  DIM wname = GetWakuwakuBaseName(y, m, n) 
+  DIM wfile = GetWakuwakuFileName(y, m, n)
+  IE.document.querySelector("#poststuff #title").value = wname
+  // スラッグを計算させる
+  IE.document.querySelector("#poststuff #title").focus()
+  IE.document.querySelector("#poststuff #title").blur()
+  IE.document.querySelector("#poststuff .wp-editor-area").value = _
+    "ダウンロードはこちらから"
+  IE.document.querySelector("#wpdmiconurl").value = _
+    "http://furatto-totsuka.com/wp/wp-content/plugins/download-manager/assets/file-type-icons/arrow_down.png"
+  PRINT "ファイル選択"
+  IE.document.querySelector("#plupload-browse-button").focus()
+  SLEEP(1)
+  KBD(VK_SPACE)
+  DIM id = GETID("アップロードするファイルの選択", "#32770", -1)
+  PRINT "ダイアログ発見"
+  SLEEP(5)
+  SENDSTR(id, w(wfile + ".pdf"), 2)
+  CLKITEM(id, "開く")
+  SLEEP(3)
+  PRINT "スラッグ設定"
+  IE.document.querySelector("#edit-slug-buttons > button.edit-slug").click()
+  SLEEP(1)
+  IE.document.querySelector("#new-post-slug").value = wfile
+  IE.document.querySelector("#edit-slug-buttons > button.save").click()
+  PRINT "保存しています。"
+  SLEEP(5)
+  IE.document.querySelector("#publish").click()  
+  SLEEP(3)
+  IE_BusyWait(IE)
+  IE.Quit()
+  PRINT ">> Wordpressアップロード処理が完了しました"
+FEND
+
+PROCEDURE OpenDir()
+  DIM workdir = GetWorkDir()
+  DIM fso = CREATEOLEOBJ("Scripting.FileSystemObject")
+  IF fso.folderExists(workdir) THEN
+    EXEC("explorer " + workdir)
+  ELSE
+    MSGBOX("ワークフォルダがありません")
+  ENDIF
+FEND
+
+FUNCTION w(n)
+  DIM workdir = GetWorkDir(FALSE)
+  DIM fso = CREATEOLEOBJ("Scripting.FileSystemObject")
+  RESULT = fso.buildPath(workdir, n)
+FEND
+
+FUNCTION GetWakuwakuBaseName(year, month, number)
+  RESULT = REPLACE(REPLACE(_WAKUWAKU_BASENAME, "m", month), "n", number)
+FEND
+
+FUNCTION GetWakuwakuFileName(year, month, number)
+  DIM mm = REPLACE(FORMAT(month, 2), " ", "0")
+  RESULT = REPLACE(REPLACE(_WAKUWAKU_BASEFILENAME, "m", mm), "y", year)
+FEND
+
+PROCEDURE IE_BusyWait(ie)
+　REPEAT
+　　SLEEP(0.2)
+　UNTIL (! ie.busy) AND (ie.readyState=4)
+FEND
+
+// 
+FUNCTION GetWakuwakuFile()
+  DIM fn[0]
+  DIM fcount = GETDIR(GET_CUR_DIR, "第*号*月号わくわくだより1-4.pdf")
+  DIM workdir
+  RESIZE(fn, fcount)
+  FOR i = 0 TO fcount  - 1
+    fn[i] = RegGetstr(_WAKUWAKU_FN_PICKER, GETDIR_FILES[i], 0)
+  NEXT
+  RESULT = SLCTBOX(SLCT_CMB + SLCT_STR, 0, "処理対象のファイルを選んでください", fn)
+FEND
+
+FUNCTION GetWorkDir(create=FALSE)
+  DIM fso = CREATEOLEOBJ("Scripting.FileSystemObject")
+  DIM tempdir = fso.getSpecialFolder(2)
+  DIM workdir = fso.buildPath(tempdir.path, _WORKDIR_NAME)
+  IFB create THEN
+    PRINT ">> ワークフォルダを作成しています。"
+    PRINT "> " + workdir
+    IFB fso.folderExists(workdir) THEN
+      // あれば中身をクリーン
+      fso.deleteFile(fso.buildPath(workdir, "*.*"), true)
+    ELSE
+      // なければ作る
+      fso.createFolder(workdir)
+    ENDIF
+  ENDIF
+  RESULT = workdir
+FEND
+
+PROCEDURE ExecuteCommand(command)
+  PRINT "> " + command
+  DIM out = DOSCMD(command, FALSE, FALSE, TRUE)
+  PRINT out
+FEND
+
+///
+/// 正規表現検索を実行する
+///
+FUNCTION RegExecute(pattern, str, ignoreCase=true,global=true)
+  DIM reg = CREATEOLEOBJ("VBScript.RegExp")
+  reg.IgnoreCase = ignoreCase
+  reg.Global = global
+  reg.Pattern = pattern
+  RESULT = reg.execute(str)
+FEND
+
+///
+/// 正規表現検索を実行し、部分文字列を取得する
+///
+FUNCTION RegGetstr(pattern, str, index, ignoreCase=true,global=true)
+  DIM m = RegExecute(pattern, str)
+  RESULT = m.item[0].subMatches[index]
+FEND

@@ -1,0 +1,89 @@
+﻿CONST PATTERN_EVENT = "^([◆◇■□])([^\t\s\n\r　]*)?[\t\s\n\r　]*([\s\S]*)$"
+PUBLIC reg = CREATEOLEOBJ("VBScript.RegExp")
+PUBLIC fso = CREATEOLEOBJ("Scripting.FileSystemObject")
+PUBLIC m = NULL
+
+COM_ERR_IGN
+DIM excel = GETACTIVEOLEOBJ( "Excel.Application")
+DIM files[0]
+DIM doc_count = GETOLEITEM( excel.workbooks )
+COM_ERR_RET
+IFB doc_count <= 0 OR COM_ERR_FLG THEN
+  MSGBOX("Excelファイルが開かれていません")
+  EXIT
+ENDIF
+RESIZE(files, doc_count)
+FOR i = 0 TO doc_count - 1
+  files[i] = ALL_OLE_ITEM[i].name
+NEXT
+// ドキュメントファイルを選択
+DIM file = SLCTBOX(SLCT_CMB + SLCT_STR, 0, "ファイルを選択", files)
+IF file = "-1" THEN EXITEXIT
+DIM count = INPUT("一日の行数は？", 5)
+IF count = EMPTY THEN EXITEXIT
+
+// ドキュメントファイルを開く
+DIM xlsx = excel.workbooks(file)
+DIM copy = excel.workbooks.add()
+DIM calendar = xlsx.sheets(1).ListObjects(1)
+DIM outcells = copy.sheets(1)
+m = regexecute("\d+", xlsx.sheets(1).range("B1").value)
+DIM year = m.item(0).value
+m = regexecute("\d+", xlsx.sheets(1).range("C1").value)
+DIM month = m.item(0).value
+// 出力先テーブル作成
+outcells.range("A1").value = "No"
+outcells.range("B1").value = "日付"
+outcells.range("C1").value = "曜日"
+outcells.range("D1").value = "印"
+outcells.range("E1").value = "イベント予定"
+outcells.range("F1").value = "時間"
+
+DIM dstlist = copy.sheets(1).listobjects.add(1, copy.sheets(1).range("A1:F1"), False, 1)
+DIM no = 1
+FOR r = 0 TO 5
+  FOR c = 1 TO 7
+    DIM ro = 2 + (r * count) + r
+    PRINT "date of:" + calendar.range.item(ro, c).address
+    DIM date = calendar.range.item(ro, c).value
+    PRINT date
+    IF POS("日", date) = 0 THEN CONTINUE
+    DIM d = REPLACE(date, "日", "")
+    FOR i = 1 TO count
+      DIM text = calendar.range.item(ro + i, c).value
+      IF text = "休館日" THEN BREAK
+      IF text = "" THEN CONTINUE
+      PRINT "read:" + calendar.range.item(ro + i, c).address
+      DIM m = regexecute(PATTERN_EVENT, text)
+      IFB m.count >= 1 THEN
+        DIM title = m.item[0].subMatches[2]
+        reg.pattern = "[\r\n\t]"
+        title = reg.replace(title, "") 
+        PRINT title
+        DIM dstrow = dstlist.listrows.add
+        dstrow.range(1).value = NO
+        dstrow.range(2).value = year + "/" + month + "/" + d
+        dstrow.range(3).value = "=MID(<#DBL>日月火水木金土<#DBL>, WEEKDAY([@日付]), 1)"
+        dstrow.range(4).value = m.item[0].subMatches[0]
+        dstrow.range(5).value = title
+        dstrow.range(6).value = m.item[0].subMatches[1]
+        NO = NO + 1
+      ELSE 
+        PRINT "unmatch!"
+      ENDIF
+    NEXT
+  NEXT
+NEXT
+dstlist.range.columns.autofit()
+MSGBOX("Finished")
+
+///
+/// 正規表現検索を実行する
+///
+FUNCTION regexecute(pattern, str, ignoreCase=true,global=true)
+  reg.IgnoreCase = ignoreCase
+  reg.Global = global
+  reg.Pattern = pattern
+  reg.Multiline = true
+  RESULT = reg.execute(str)
+FEND
