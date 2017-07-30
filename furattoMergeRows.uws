@@ -1,0 +1,63 @@
+CALL Modules\Excel
+DIM command = SLCTBOX(SLCT_BTN, 0, "実行する処理を選択してください", "日付行の結合", "日付行の分離", "キャンセル")
+IF command = SLCT_3 THEN EXIT
+DIM xl = Excel.GETEXCEL()
+IF xl = NULL THEN 
+  MSGBOX("Excelが起動されていません")
+  EXIT
+ENDIF
+DIM wb = Excel.CHOICEFILE()
+IF wb = NULL THEN EXIT
+DIM sheet = Excel.CHOICESHEET(wb)
+PUBLIC prevday
+PUBLIC prevweek
+xl.screenUpdating = FALSE
+xl.displayAlerts = FALSE
+SELECT command
+CASE SLCT_1
+  PRINT "日付行の結合を行います"
+  Excel.EACHROWS(sheet.cells(1, 1).currentRegion, "mergerows", TRUE)
+CASE SLCT_2
+  PRINT "日付行の分離を行います"
+  Excel.EACHROWS(sheet.cells(1, 1).currentRegion, "splitrows", TRUE)
+SELEND
+xl.screenUpdating = TRUE
+xl.displayAlerts = TRUE
+PRINT "完了"
+
+FUNCTION mergerows(row, no)
+  // 同じ日付の行を結合する処理(次の行と今の行の日付が同じだったら結合する)
+  DIM nrow = row
+  DIM mergedcell
+  DIM xl = Excel.GETEXCEL()
+  mergedcell = row.cells(1)
+  WHILE nrow.rows(2).cells(1).value = row.cells(1).value
+    mergedcell = xl.Union(mergedcell, nrow.rows(2).cells(1))
+    nrow = nrow.rows(2)
+  WEND
+  IF row.cells(1).mergeCells OR nrow.cells(1).mergeCells THEN EXIT
+  IF row.address <> nrow.address THEN
+    PRINT row.address + "から" + nrow.address + "をマージします"
+    mergedcell.merge()
+    mergedcell.columns(2).merge()
+    skiprow = nrow.row - row.row 
+  ENDIF
+  RESULT = TRUE
+FEND
+
+FUNCTION splitrows(row, no)
+  // 結合していた行を戻す処理
+  IF row.cells(1).mergeCells THEN
+    PRINT row.cells.address + "行を分離します"
+    row.cells(1).unMerge
+    row.cells(2).unMerge
+  ENDIF
+  IF row.cells(1).value <> "" THEN
+    prevday = row.cells(1).value
+    prevweek= row.cells(2).value
+  ELSE
+    row.cells(1).value = prevday
+    row.cells(2).value = prevweek
+  ENDIF
+  RESULT = TRUE
+FEND

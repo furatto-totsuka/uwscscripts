@@ -1,0 +1,57 @@
+//
+// Office汎用モジュール
+// 実際に利用する際には、それぞれモジュールでラップすること
+//
+MODULE Office
+
+	DIM app = NULL
+
+  //
+  // OfficeのOLEオブジェクトを取得する
+  // olename…オブジェクトの名称
+  // active…trueを指定すると、アクティブなOLEオブジェクトを対象とする
+  // 戻り値…Officeオブジェクト。開かれていなかった場合NULL
+  //
+  FUNCTION GETOBJECT(olename, active=TRUE)
+  	app = NULL
+  	COM_ERR_IGN
+  	IF active THEN 
+  	  app = GETACTIVEOLEOBJ(olename)
+  	ELSE
+  	  app = CREATEOLEOBJ(olename)
+  	ENDIF
+  	COM_ERR_RET
+  	IF COM_ERR_FLG THEN app = NULL
+    RESULT = app
+  FEND
+
+  //
+  // 開いている全てのファイルの中から一つを選択して返す
+  // collection_name…全てのファイルを示すコレクションオブジェクトの名称
+  // 戻り値…選択されたファイル。
+  //   ファイルが開いていない場合、選択がキャンセルされた場合はNULLを返す
+  //
+  FUNCTION CHOICEFILECORE(collection_name)
+    DIM files[0]
+    COM_ERR_IGN
+    DIM count = EVAL("GETOLEITEM(app." + collection_name + ")")
+    COM_ERR_RET
+    IFB count <= 0 OR COM_ERR_FLG THEN
+      RESULT = NULL
+    ELSE
+      RESIZE(files, count)
+      FOR i = 0 TO count - 1
+        files[i] = ALL_OLE_ITEM[i].name
+      NEXT
+      // ファイルを選択
+      DIM file = SLCTBOX(SLCT_CMB + SLCT_STR, 0, "ファイルを選択", files)
+
+      IF file = "-1" THEN
+        RESULT = NULL
+      ELSE
+        RESULT = EVAL("app." + collection_name + "(file)")
+      ENDIF
+    ENDIF
+  FEND
+
+ENDMODULE

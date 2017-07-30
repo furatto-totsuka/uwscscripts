@@ -1,0 +1,44 @@
+CALL Office
+MODULE Excel
+
+  FUNCTION GETEXCEL(active=TRUE)
+    RESULT = Office.GETOBJECT("Excel.Application", active)
+  FEND
+  
+  FUNCTION CHOICEFILE()
+    RESULT = Office.CHOICEFILECORE("workbooks")
+  FEND
+  
+  FUNCTION CHOICESHEET(workbook)
+    DIM names[0]
+    DIM cnt = workbook.sheets.count
+    IF cnt <= 0 THEN
+      RESULT = NULL
+    ELSEIF cnt = 1 THEN
+      RESULT = workbook.sheets[1]
+    ELSE
+      RESIZE(names, cnt)
+      FOR i = 0 TO cnt - 1
+        names[i] = workbook.sheets[i + 1].name
+      NEXT
+      // シートを選択
+      DIM name = SLCTBOX(SLCT_CMB + SLCT_STR, 0, "シートを選択", names)
+
+      IF name = "-1" THEN
+        RESULT = NULL
+      ELSE
+        RESULT = workbook.sheets[name]
+      ENDIF
+    ENDIF
+  FEND
+  
+  PROCEDURE EACHROWS(table, callback, skipfirst = TRUE) 
+    DIM r = TRUE
+    FOR i = 1 TO table.rows.count
+      IF skipfirst AND i = 1 THEN CONTINUE
+      r = EVAL(callback + "(table.rows[i], i)")
+      IF r = FALSE THEN BREAK 
+    NEXT
+  FEND
+  
+ENDMODULE
